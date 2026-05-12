@@ -68,6 +68,7 @@ jobs:
               if [ "$status_code" = "404" ]; then
                 echo "Creating repo ${repo_name} on Gitea"
 
+                # 仅在仓库不存在时创建为私有；已存在仓库不会改动当前可见性。
                 curl -fsSL -X POST \
                   -H "Authorization: token ${GITEA_TOKEN}" \
                   -H "Content-Type: application/json" \
