@@ -1,0 +1,91 @@
+name: Sync All GitHub Repos To Gitea
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout control repo
+        uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Sync repositories
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GITEA_BASE_URL: ${{ secrets.GITEA_BASE_URL }}
+          GITEA_OWNER: ${{ secrets.GITEA_OWNER }}
+          SOURCE_OWNER: ${{ secrets.SOURCE_OWNER }}
+          SOURCE_TYPE: ${{ secrets.SOURCE_TYPE }}
+        run: |
+          set -euo pipefail
+
+          if [ "$SOURCE_TYPE" = "org" ]; then
+            api_url="https://api.github.com/orgs/${SOURCE_OWNER}/repos?per_page=100"
+          else
+            api_url="https://api.github.com/users/${SOURCE_OWNER}/repos?per_page=100"
+          fi
+
+          page=1
+          while true; do
+            repos=$(curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "${api_url}&page=${page}")
+
+            count=$(echo "$repos" | jq 'length')
+            if [ "$count" -eq 0 ]; then
+              break
+            fi
+
+            echo "$repos" | jq -c '.[]' | while read -r repo; do
+              repo_name=$(echo "$repo" | jq -r '.name')
+              private=$(echo "$repo" | jq -r '.private')
+              clone_url=$(echo "$repo" | jq -r '.clone_url')
+
+              echo "Processing ${repo_name}"
+
+              gitea_repo_api="${GITEA_BASE_URL}/api/v1/repos/${GITEA_OWNER}/${repo_name}"
+              create_repo_api="${GITEA_BASE_URL}/api/v1/user/repos"
+
+              status_code=$(curl -s -o /dev/null -w "%{http_code}" \
+                -H "Authorization: token ${GITEA_TOKEN}" \
+                "${gitea_repo_api}")
+
+              if [ "$status_code" = "404" ]; then
+                echo "Creating repo ${repo_name} on Gitea"
+
+                curl -fsSL -X POST \
+                  -H "Authorization: token ${GITEA_TOKEN}" \
+                  -H "Content-Type: application/json" \
+                  "${create_repo_api}" \
+                  -d "{
+                    \"name\": \"${repo_name}\",
+                    \"private\": ${private}
+                  }"
+              fi
+
+              workdir=$(mktemp -d)
+              repo_dir="${workdir}/${repo_name}.git"
+
+              auth_clone_url=$(echo "$clone_url" | sed "s#https://#https://${SOURCE_OWNER}:${GH_TOKEN}@#")
+              gitea_push_url=$(echo "${GITEA_BASE_URL}/${GITEA_OWNER}/${repo_name}.git" | sed "s#https://#https://${GITEA_OWNER}:${GITEA_TOKEN}@#")
+
+              git clone --mirror "$auth_clone_url" "$repo_dir"
+              git -C "$repo_dir" remote set-url origin "$gitea_push_url"
+              git -C "$repo_dir" push --mirror
+
+              rm -rf "$workdir"
+            done
+
+            page=$((page + 1))
+          done
