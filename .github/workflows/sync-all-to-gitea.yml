@@ -54,6 +54,11 @@ jobs:
 
               echo "Processing ${repo_name}"
 
+              if [ "$repo_name" = "github-to-gitea-sync" ]; then
+                echo "Skipping control repo ${repo_name}"
+                continue
+              fi
+
               gitea_repo_api="${GITEA_BASE_URL}/api/v1/repos/${GITEA_OWNER}/${repo_name}"
               create_repo_api="${GITEA_BASE_URL}/api/v1/user/repos"
 
@@ -81,8 +86,20 @@ jobs:
               gitea_push_url=$(echo "${GITEA_BASE_URL}/${GITEA_OWNER}/${repo_name}.git" | sed "s#https://#https://${GITEA_OWNER}:${GITEA_TOKEN}@#")
 
               git clone --mirror "$auth_clone_url" "$repo_dir"
+
+              if ! git -C "$repo_dir" show-ref --quiet; then
+                echo "Skipping empty source repo ${repo_name}"
+                rm -rf "$workdir"
+                continue
+              fi
+
               git -C "$repo_dir" remote set-url origin "$gitea_push_url"
-              git -C "$repo_dir" push --mirror
+
+              if ! git -C "$repo_dir" push --mirror; then
+                echo "Failed to mirror ${repo_name}, continuing with next repo"
+                rm -rf "$workdir"
+                continue
+              fi
 
               rm -rf "$workdir"
             done
