@@ -49,7 +49,6 @@ jobs:
 
             echo "$repos" | jq -c '.[]' | while read -r repo; do
               repo_name=$(echo "$repo" | jq -r '.name')
-              private=$(echo "$repo" | jq -r '.private')
               clone_url=$(echo "$repo" | jq -r '.clone_url')
 
               echo "Processing ${repo_name}"
@@ -75,7 +74,7 @@ jobs:
                   "${create_repo_api}" \
                   -d "{
                     \"name\": \"${repo_name}\",
-                    \"private\": ${private}
+                    \"private\": true
                   }"
               fi
 
